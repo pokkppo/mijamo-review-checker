@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>미자모 서평 검토기</title>
+<style>
+  body { font-family: -apple-system, "Malgun Gothic", sans-serif; max-width: 900px; margin: 40px auto; padding: 0 16px; color: #222; }
+  h1 { font-size: 22px; }
+  p.desc { color: #555; font-size: 14px; }
+  textarea { width: 100%; height: 220px; font-family: monospace; font-size: 13px; padding: 10px; box-sizing: border-box; }
+  .btn-row { margin-top: 12px; }
+  button { padding: 10px 20px; font-size: 15px; cursor: pointer; }
+  #resetBtn { margin-left: 8px; background: #f2f2f2; }
+  #summary { margin-top: 24px; font-size: 15px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th, td { border: 1px solid #ddd; padding: 8px; text-align: center; font-size: 14px; }
+  th { background: #f5f5f5; }
+  .row-detail { text-align: left; font-size: 12px; color: #555; background: #fafafa; }
+  .status-okay { color: #1a8a3d; }
+  .status-check { color: #d32f2f; }
+  .status-unreachable { color: #b8860b; }
+  #loading { display: none; margin-top: 16px; color: #666; }
+</style>
+</head>
+<body>
+  <h1>미자모 서평 검토기</h1>
+  <p class="desc">엑셀/구글시트에서 표를 복사해서 아래에 붙여넣으세요. (닉네임 / 카페링크 / 블로그or인스타링크 / 서점링크1 / 서점링크2 / 기타(선택) 순서)</p>
+  <textarea id="input" placeholder="여기에 표를 붙여넣으세요"></textarea>
+  <br>
+  <div class="btn-row">
+    <button id="reviewBtn">전체 검토하기</button>
+    <button id="resetBtn">초기화</button>
+  </div>
+  <div id="loading">검토 중입니다. 링크 수에 따라 시간이 다소 걸릴 수 있어요...</div>
+
+  <div id="summary"></div>
+  <div id="resultArea"></div>
+
+<script>
+const STATUS_LABEL = { "okay": "OKAY", "check": "CHECK", "unreachable": "접속 불가" };
+const FINAL_ICON = { "OKAY": "🟢", "CHECK": "🔴", "접속 불가": "🟡" };
+const CELL_STATUS_CLASS = { "okay": "status-okay", "check": "status-check", "unreachable": "status-unreachable" };
+const REQUIRED_COLS = ["카페링크", "블로그or인스타링크", "서점링크1", "서점링크2"];
+
+document.getElementById('reviewBtn').addEventListener('click', async () => {
+  const text = document.getElementById('input').value;
+  if (!text.trim()) { alert('붙여넣은 표가 없습니다.'); return; }
+
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('summary').innerHTML = '';
+  document.getElementById('resultArea').innerHTML = '';
+
+  try {
+    const res = await fetch('/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ table_text: text }),
+    });
+    const data = await res.json();
+    document.getElementById('loading').style.display = 'none';
+
+    if (data.error) {
+      document.getElementById('summary').textContent = '오류: ' + data.error;
+      return;
+    }
+    render(data.results);
+  } catch (e) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('summary').textContent = '요청 중 오류가 발생했습니다: ' + e;
+  }
+});
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  document.getElementById('input').value = '';
+  document.getElementById('summary').innerHTML = '';
+  document.getElementById('resultArea').innerHTML = '';
+});
+
+function render(results) {
+  const total = results.length;
+  const counts = { "OKAY": 0, "CHECK": 0, "접속 불가": 0 };
+  results.forEach(r => counts[r.final]++);
+
+  document.getElementById('summary').innerHTML =
+    `<p>총 ${total}명</p>` +
+    `<p>🟢 OKAY ${counts["OKAY"]}명 &nbsp; 🔴 CHECK ${counts["CHECK"]}명 &nbsp; 🟡 접속 불가 ${counts["접속 불가"]}명</p>`;
+
+  // 기타 컬럼은 결과에 존재하는 사람이 한 명이라도 있을 때만 표시
+  const hasEtc = results.some(r => r.details && r.details["기타"]);
+  const cols = hasEtc ? REQUIRED_COLS.concat(["기타"]) : REQUIRED_COLS;
+
+  let html = '<table><tr><th>닉네임</th>';
+  cols.forEach(col => { html += `<th>${col.replace("링크", "")}</th>`; });
+  html += '<th>최종</th></tr>';
+
+  results.forEach(r => {
+    html += '<tr>';
+    html += `<td>${r.닉네임}</td>`;
+    cols.forEach(col => {
+      const d = r.details[col];
+      if (!d) { html += '<td>-</td>'; return; }
+      const label = STATUS_LABEL[d.status];
+      const cls = CELL_STATUS_CLASS[d.status];
+      html += `<td class="${cls}" title="${d.message}">${label}</td>`;
+    });
+    html += `<td>${FINAL_ICON[r.final]} ${r.final}</td>`;
+    html += '</tr>';
+
+    html += `<tr><td colspan="${cols.length + 2}" class="row-detail">`;
+    cols.forEach(col => {
+      const d = r.details[col];
+      if (d) html += `${col}: ${d.message}<br>`;
+    });
+    html += `</td></tr>`;
+  });
+  html += '</table>';
+  document.getElementById('resultArea').innerHTML = html;
+}
+</script>
+</body>
+</html>
